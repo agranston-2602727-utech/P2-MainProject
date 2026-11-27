@@ -2,14 +2,15 @@
  * Community Food Bank Inventory and Distribution System
  * Part 1 - Program Entry and Shared Design
  *
- * This file contains the entire program for Part 1, which includes the
- * program entry point, user registration and login,
- * the administrator and customer menus, and the shared declarations
- * (constants, structures and function prototypes) used by Parts 2-4.
- *
- * Part 3 (Customer Requests, by Matthew-Earle Ellington "2004981") has been
- * integrated into this file. Its constants, structure, variables and
- * functions are kept separate from Part 1 and are labelled "PART 3".
+ * This file contains the whole program:
+ *   - Part 1: program entry point, user registration and login, the
+ *     administrator and customer menus, and the shared declarations
+ *     (constants, structures and function prototypes).
+ *   - Part 2: Inventory and Donations (section 10).
+ *   - Part 3: Customer Requests, by Matthew-Earle Ellington "2004981"
+ *     (section 11).
+ * Each part's constants, structures and functions are labelled "PART 2" or
+ * "PART 3" so they stay separate from Part 1.
  *
  * Functions marked "PLACEHOLDER" belong to other group members. They only
  * print a message so the program compiles and the menus can be tested.
@@ -24,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>   // INT_MAX - used by Part 2 to stop stock overflowing
 
 // 2. Constants
 
@@ -60,6 +62,10 @@
 
 // Value returned by loginUser() when login fails
 #define LOGIN_FAILED -1
+
+// PART 2 - Inventory and Donation constants
+#define LOW_STOCK_THRESHOLD 5   // Stock below this at a location is "low"
+#define NEW_ITEM_OPTION     0   // Entered in recordDonation() to add a new item
 
 // PART 3 - Customer Request constants
 #define MAX_REQUESTS   100  // Maximum number of customer requests stored
@@ -113,18 +119,21 @@ void displayCustomerMenu(void);
 void runCustomerMenu(FoodItem items[], int *itemCount,
                      Request requests[], int *requestCount);
 
-// Interfaces for Parts 2 and 4 (PLACEHOLDERS in this file)
+// PART 2 - Inventory and Donations
+long long totalStock(const FoodItem *item);
 void listFoodItems(const FoodItem items[], int itemCount);
+void updateStock(int *quantity, int amount);
 void recordDonation(FoodItem items[], int *itemCount);
 void displayLowStockItems(const FoodItem items[], int itemCount);
-void sortFoodItemsByStock(FoodItem items[], int itemCount);
-void saveData(const FoodItem items[], int itemCount);
 
-// PART 3 - Customer Requests
+// PART 3 - Customer Requests (also uses totalStock() from Part 2)
 int findItemIndexById(const FoodItem items[], int itemCount, int searchItemId);
-int itemTotalStock(const FoodItem *item);
 void makeFoodRequest(const FoodItem items[], int itemCount,
                      Request requests[], int *requestCount);
+
+// Remaining features (PLACEHOLDERS in this file)
+void sortFoodItemsByStock(FoodItem items[], int itemCount);
+void saveData(const FoodItem items[], int itemCount);
 
 // ==========================================
 // 5. Main Function
@@ -412,49 +421,184 @@ void runCustomerMenu(FoodItem items[], int *itemCount,
 }
 
 // ==========================================
-// 10. Integration Functions for Parts 2 and 4
+// 10. PART 2 - Inventory and Donations
 // ==========================================
-// PLACEHOLDERS ONLY. Each function prints a message so the menus can be
-// tested. Delete each placeholder when the group member's real function
-// is added to the project.
+// Lets the administrator view the inventory, record donations (adding new
+// food items when needed) and see which items are running low.
+//
+// Item numbering: items are numbered 1, 2, 3 ... in the order they are
+// added, so an item's number is always (its array index + 1). The functions
+// below rely on this to turn the number a user types into an array index.
 
-// PLACEHOLDER - Part 2: list every food item with its stock per location
+// Adds up the stock of one item across every location.
+// A long long is returned because the sum of several int values can be
+// larger than the biggest value an int can hold.
+long long totalStock(const FoodItem *item)
+{
+    long long stockTotal = 0;   // Running total of stock
+    int locationIndex;          // Location being added (0 to NUM_LOCATIONS - 1)
+
+    for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+        stockTotal += item->stock[locationIndex];
+    }
+
+    return stockTotal;
+}
+
+// Prints every food item, its stock at each location and its total stock.
 void listFoodItems(const FoodItem items[], int itemCount)
 {
-    (void)items;
-    printf("[PLACEHOLDER] listFoodItems() not yet implemented (%d items stored).\n", itemCount);
+    int itemIndex;       // Item being printed
+    int locationIndex;   // Location being printed for that item
+
+    printf("\n--- FOOD INVENTORY ---\n");
+
+    if (itemCount == 0) {
+        printf("No food items available.\n");
+        return;
+    }
+
+    for (itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        // Item heading, e.g. "1. Rice"
+        printf("\n%d. %s\n", items[itemIndex].itemId, items[itemIndex].name);
+
+        // Stock at each location (shown to the user as Location 1, 2, 3)
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+            printf("Location %d: %d\n",
+                   locationIndex + 1, items[itemIndex].stock[locationIndex]);
+        }
+
+        printf("Total stock: %lld\n", totalStock(&items[itemIndex]));
+    }
 }
 
-// PLACEHOLDER - Part 2: add donated stock (may add a new item, so the count is a pointer)
+// Adds an amount to a stock value. The stock value is passed by pointer
+// so the change is made to the original variable, not a copy.
+void updateStock(int *quantity, int amount)
+{
+    *quantity += amount;
+}
+
+// Records a donation of one food item at one location.
+// The administrator may pick an existing item or enter NEW_ITEM_OPTION (0)
+// to add a new item. All input is checked before anything is changed, so
+// a mistake never leaves a half-created item in the inventory.
 void recordDonation(FoodItem items[], int *itemCount)
 {
-    (void)items;
-    (void)itemCount;
-    printf("[PLACEHOLDER] recordDonation() not yet implemented.\n");
+    int itemNumber;          // Item number typed by the user (0 = new item)
+    int itemIndex;           // Array position of the item receiving the donation
+    int locationNumber;      // Location typed by the user (1 to NUM_LOCATIONS)
+    int locationIndex;       // Array position of that location
+    int donationAmount;      // Number of units donated
+    char newItemName[MAX_ITEM_NAME_LENGTH];   // Name, only used for a new item
+
+    printf("\n--- RECORD DONATION ---\n");
+
+    // Step 1: show the items so the user can choose one
+    listFoodItems(items, *itemCount);
+
+    // Step 2: read and check the item number
+    printf("\nEnter item number or %d to add a new item: ", NEW_ITEM_OPTION);
+    itemNumber = readInteger();
+
+    if (itemNumber < NEW_ITEM_OPTION || itemNumber > *itemCount) {
+        printf("Invalid item number.\n");
+        return;
+    }
+
+    // Step 3: for a new item, check there is room and read its name
+    if (itemNumber == NEW_ITEM_OPTION) {
+        if (*itemCount >= MAX_ITEMS) {
+            printf("Inventory is full.\n");
+            return;
+        }
+
+        printf("Enter food name: ");
+        readString(newItemName, MAX_ITEM_NAME_LENGTH);
+
+        if (strlen(newItemName) == 0) {
+            printf("Invalid food name.\n");
+            return;
+        }
+    }
+
+    // Step 4: read and check the location
+    printf("Enter location (1-%d): ", NUM_LOCATIONS);
+    locationNumber = readInteger();
+
+    if (locationNumber < 1 || locationNumber > NUM_LOCATIONS) {
+        printf("Invalid location.\n");
+        return;
+    }
+
+    // Step 5: read and check the donation amount
+    // (readInteger() returns -1 for invalid input, so it is rejected here too)
+    printf("Enter donation amount: ");
+    donationAmount = readInteger();
+
+    if (donationAmount <= 0) {
+        printf("Invalid donation amount.\n");
+        return;
+    }
+
+    // Step 6: all input is valid - create the new item if one was requested
+    if (itemNumber == NEW_ITEM_OPTION) {
+        itemNumber = *itemCount + 1;   // Next item number in sequence
+
+        items[*itemCount].itemId = itemNumber;
+        strcpy(items[*itemCount].name, newItemName);
+
+        // A new item starts with no stock at any location
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+            items[*itemCount].stock[locationIndex] = 0;
+        }
+
+        (*itemCount)++;
+    }
+
+    // Convert the numbers the user typed (starting at 1) into array indexes
+    itemIndex = itemNumber - 1;
+    locationIndex = locationNumber - 1;
+
+    // Step 7: stop the stock going past the largest value an int can hold
+    if ((long long)items[itemIndex].stock[locationIndex] + donationAmount > INT_MAX) {
+        printf("Donation amount is too large.\n");
+        return;
+    }
+
+    // Step 8: add the donation and confirm it to the user
+    updateStock(&items[itemIndex].stock[locationIndex], donationAmount);
+
+    printf("\nDonation recorded successfully!\n");
+    printf("Food item: %s\n", items[itemIndex].name);
+    printf("New stock: %d\n", items[itemIndex].stock[locationIndex]);
 }
 
-// PLACEHOLDER - Part 2: show items whose stock is below the agreed threshold
+// Lists every item and location where stock is below LOW_STOCK_THRESHOLD.
+// Each location is checked on its own, so one item can appear more than once.
 void displayLowStockItems(const FoodItem items[], int itemCount)
 {
-    (void)items;
-    (void)itemCount;
-    printf("[PLACEHOLDER] displayLowStockItems() not yet implemented.\n");
-}
+    int itemIndex;          // Item being checked
+    int locationIndex;      // Location being checked for that item
+    int lowStockFound = 0;  // Becomes 1 once any low-stock entry is printed
 
-// PLACEHOLDER - Part 2: sort items by total stock and display them
-void sortFoodItemsByStock(FoodItem items[], int itemCount)
-{
-    (void)items;
-    (void)itemCount;
-    printf("[PLACEHOLDER] sortFoodItemsByStock() not yet implemented.\n");
-}
+    printf("\n--- LOW STOCK ITEMS ---\n");
 
-// PLACEHOLDER - Part 4 (Member 4): save the food item records
-void saveData(const FoodItem items[], int itemCount)
-{
-    (void)items;
-    (void)itemCount;
-    printf("[PLACEHOLDER] saveData() not yet implemented. Nothing was saved.\n");
+    for (itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+            if (items[itemIndex].stock[locationIndex] < LOW_STOCK_THRESHOLD) {
+                printf("%s - Location %d: %d left\n",
+                       items[itemIndex].name, locationIndex + 1,
+                       items[itemIndex].stock[locationIndex]);
+
+                lowStockFound = 1;
+            }
+        }
+    }
+
+    if (lowStockFound == 0) {
+        printf("No low stock items found.\n");
+    }
 }
 
 // ==========================================
@@ -468,7 +612,8 @@ void saveData(const FoodItem items[], int itemCount)
 //
 // Part 3 uses its own data (the Request structure, the requests array and
 // requestCount, declared in main) and its own local variable names, so it
-// does not share or overwrite any Part 1 variables.
+// does not share or overwrite any Part 1 or Part 2 variables. The only
+// Part 2 function it uses is totalStock(), to add up an item's stock.
 
 // Searches the items array for the item with the given ID.
 // Returns the array index of that item, or ITEM_NOT_FOUND if no item matches.
@@ -484,19 +629,6 @@ int findItemIndexById(const FoodItem items[], int itemCount, int searchItemId)
     return ITEM_NOT_FOUND;         // Checked every item, no match
 }
 
-// Adds up the stock of one item across all food bank locations.
-// Returns the total number of units available.
-int itemTotalStock(const FoodItem *item)
-{
-    int locationIndex;    // Location being added (0 to NUM_LOCATIONS - 1)
-    int stockTotal = 0;   // Running total of stock
-
-    for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
-        stockTotal += item->stock[locationIndex];
-    }
-    return stockTotal;
-}
-
 // Lets a customer request a quantity of one food item and records the request.
 // The request is rejected (nothing is stored) if:
 //   - there are no food items,
@@ -508,11 +640,11 @@ int itemTotalStock(const FoodItem *item)
 void makeFoodRequest(const FoodItem items[], int itemCount,
                      Request requests[], int *requestCount)
 {
-    int requestedItemId;     // Item ID typed by the customer
-    int requestedQuantity;   // Quantity typed by the customer
-    int requestedItemIndex;  // Position of the requested item in the items array
-    int availableStock;      // Total stock of the requested item
-    Request newRequest;      // The request being built before it is stored
+    int requestedItemId;        // Item ID typed by the customer
+    int requestedQuantity;      // Quantity typed by the customer
+    int requestedItemIndex;     // Position of the requested item in the items array
+    long long availableStock;   // Total stock of the requested item (all locations)
+    Request newRequest;         // The request being built before it is stored
 
     // Step 1: make sure a request is possible at all
     if (itemCount == 0) {
@@ -547,9 +679,10 @@ void makeFoodRequest(const FoodItem items[], int itemCount,
     }
 
     // Step 5: make sure enough stock exists across all locations
-    availableStock = itemTotalStock(&items[requestedItemIndex]);
+    // (totalStock() is shared with Part 2, see section 10)
+    availableStock = totalStock(&items[requestedItemIndex]);
     if (requestedQuantity > availableStock) {
-        printf("Request failed: only %d of %s available.\n",
+        printf("Request failed: only %lld of %s available.\n",
                availableStock, items[requestedItemIndex].name);
         return;
     }
@@ -564,4 +697,26 @@ void makeFoodRequest(const FoodItem items[], int itemCount,
 
     printf("Request #%d recorded: %d x %s.\n",
            newRequest.requestId, requestedQuantity, items[requestedItemIndex].name);
+}
+
+// ==========================================
+// 12. Placeholders for Remaining Features
+// ==========================================
+// These functions only print a message so the menus can be tested.
+// Replace each one when the group member's real function is added.
+
+// PLACEHOLDER - Part 2: sort items by total stock and display them
+void sortFoodItemsByStock(FoodItem items[], int itemCount)
+{
+    (void)items;
+    (void)itemCount;
+    printf("[PLACEHOLDER] sortFoodItemsByStock() not yet implemented.\n");
+}
+
+// PLACEHOLDER - Part 4 (Member 4): save the food item records
+void saveData(const FoodItem items[], int itemCount)
+{
+    (void)items;
+    (void)itemCount;
+    printf("[PLACEHOLDER] saveData() not yet implemented. Nothing was saved.\n");
 }
