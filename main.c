@@ -20,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>   // INT_MAX - used by Part 2 to stop stock overflowing
 
 // ==========================================
 // 2. Constants
@@ -58,6 +59,10 @@
 
 // Value returned by loginUser() when login fails
 #define LOGIN_FAILED -1
+
+// PART 2 - Inventory and Donation constants
+#define LOW_STOCK_THRESHOLD 5   // Stock below this at a location is "low"
+#define NEW_ITEM_OPTION     0   // Entered in recordDonation() to add a new item
 
 // ==========================================
 // 3. Structure Declarations
@@ -99,10 +104,14 @@ void runAdminMenu(FoodItem items[], int *itemCount);
 void displayCustomerMenu(void);
 void runCustomerMenu(FoodItem items[], int *itemCount);
 
-// Interfaces for Parts 2-4 (PLACEHOLDERS in this file)
+// PART 2 - Inventory and Donations
+long long totalStock(const FoodItem *item);
 void listFoodItems(const FoodItem items[], int itemCount);
+void updateStock(int *quantity, int amount);
 void recordDonation(FoodItem items[], int *itemCount);
 void displayLowStockItems(const FoodItem items[], int itemCount);
+
+// Interfaces for other parts (PLACEHOLDERS in this file)
 void sortFoodItemsByStock(FoodItem items[], int itemCount);
 void makeFoodRequest(FoodItem items[], int itemCount);
 void saveData(const FoodItem items[], int itemCount);
@@ -387,32 +396,36 @@ void runCustomerMenu(FoodItem items[], int *itemCount)
     }
 }
 
-// ==========================================
-// 10. Integration Functions for Parts 2-4
-// ==========================================
-// PLACEHOLDERS ONLY. Each function prints a message so the menus can be
-// tested. Delete each placeholder when the group member's real function
-// is added to the project.
+// ------------------------------------------
+// PART 2 - Inventory and Donations
+// ------------------------------------------
+// Lets the administrator view the inventory, record donations (adding new
+// food items when needed) and see which items are running low.
+//
+// Item numbering: items are numbered 1, 2, 3 ... in the order they are
+// added, so an item's number is always (its array index + 1). The functions
+// below rely on this to turn the number a user types into an array index.
 
-// Part 2 - Inventory and Donations
-
-// Calculate the total stock for one item
+// Adds up the stock of one item across every location.
+// A long long is returned because the sum of several int values can be
+// larger than the biggest value an int can hold.
 long long totalStock(const FoodItem *item)
 {
-    long long total = 0;
-    int j;
+    long long stockTotal = 0;   // Running total of stock
+    int locationIndex;          // Location being added (0 to NUM_LOCATIONS - 1)
 
-    for (j = 0; j < NUM_LOCATIONS; j++) {
-        total += item->stock[j];
+    for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+        stockTotal += item->stock[locationIndex];
     }
 
-    return total;
+    return stockTotal;
 }
 
-// Display all food items and their stock
+// Prints every food item, its stock at each location and its total stock.
 void listFoodItems(const FoodItem items[], int itemCount)
 {
-    int i, j;
+    int itemIndex;       // Item being printed
+    int locationIndex;   // Location being printed for that item
 
     printf("\n--- FOOD INVENTORY ---\n");
 
@@ -421,137 +434,148 @@ void listFoodItems(const FoodItem items[], int itemCount)
         return;
     }
 
-    // Go through each food item
-    for (i = 0; i < itemCount; i++) {
-        printf("\n%d. %s\n", items[i].itemId, items[i].name);
+    for (itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        // Item heading, e.g. "1. Rice"
+        printf("\n%d. %s\n", items[itemIndex].itemId, items[itemIndex].name);
 
-        // Show stock at each location
-        for (j = 0; j < NUM_LOCATIONS; j++) {
+        // Stock at each location (shown to the user as Location 1, 2, 3)
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
             printf("Location %d: %d\n",
-                   j + 1, items[i].stock[j]);
+                   locationIndex + 1, items[itemIndex].stock[locationIndex]);
         }
 
-        printf("Total stock: %lld\n", totalStock(&items[i]));
+        printf("Total stock: %lld\n", totalStock(&items[itemIndex]));
     }
 }
 
-// Update the stock using a pointer
+// Adds an amount to a stock value. The stock value is passed by pointer
+// so the change is made to the original variable, not a copy.
 void updateStock(int *quantity, int amount)
 {
     *quantity += amount;
 }
 
-// Record a food donation
+// Records a donation of one food item at one location.
+// The administrator may pick an existing item or enter NEW_ITEM_OPTION (0)
+// to add a new item. All input is checked before anything is changed, so
+// a mistake never leaves a half-created item in the inventory.
 void recordDonation(FoodItem items[], int *itemCount)
 {
-    int item, location, amount, j;
-    char name[MAX_ITEM_NAME_LENGTH];
+    int itemNumber;          // Item number typed by the user (0 = new item)
+    int itemIndex;           // Array position of the item receiving the donation
+    int locationNumber;      // Location typed by the user (1 to NUM_LOCATIONS)
+    int locationIndex;       // Array position of that location
+    int donationAmount;      // Number of units donated
+    char newItemName[MAX_ITEM_NAME_LENGTH];   // Name, only used for a new item
 
     printf("\n--- RECORD DONATION ---\n");
 
-    // Display the available food items
+    // Step 1: show the items so the user can choose one
     listFoodItems(items, *itemCount);
 
-    printf("\nEnter item number or 0 to add a new item: ");
-    item = readInteger();
+    // Step 2: read and check the item number
+    printf("\nEnter item number or %d to add a new item: ", NEW_ITEM_OPTION);
+    itemNumber = readInteger();
 
-    if (item < 0 || item > *itemCount) {
+    if (itemNumber < NEW_ITEM_OPTION || itemNumber > *itemCount) {
         printf("Invalid item number.\n");
         return;
     }
 
-    // Check if there is space for a new item
-    if (item == 0) {
+    // Step 3: for a new item, check there is room and read its name
+    if (itemNumber == NEW_ITEM_OPTION) {
         if (*itemCount >= MAX_ITEMS) {
             printf("Inventory is full.\n");
             return;
         }
 
         printf("Enter food name: ");
-        readString(name, MAX_ITEM_NAME_LENGTH);
+        readString(newItemName, MAX_ITEM_NAME_LENGTH);
 
-        if (strlen(name) == 0) {
+        if (strlen(newItemName) == 0) {
             printf("Invalid food name.\n");
             return;
         }
     }
 
+    // Step 4: read and check the location
     printf("Enter location (1-%d): ", NUM_LOCATIONS);
-    location = readInteger();
+    locationNumber = readInteger();
 
-    if (location < 1 || location > NUM_LOCATIONS) {
+    if (locationNumber < 1 || locationNumber > NUM_LOCATIONS) {
         printf("Invalid location.\n");
         return;
     }
 
+    // Step 5: read and check the donation amount
+    // (readInteger() returns -1 for invalid input, so it is rejected here too)
     printf("Enter donation amount: ");
-    amount = readInteger();
+    donationAmount = readInteger();
 
-    // Make sure the amount is valid
-    if (amount <= 0) {
+    if (donationAmount <= 0) {
         printf("Invalid donation amount.\n");
         return;
     }
 
-    // Create a new food item if needed
-    if (item == 0) {
-        item = *itemCount + 1;
+    // Step 6: all input is valid - create the new item if one was requested
+    if (itemNumber == NEW_ITEM_OPTION) {
+        itemNumber = *itemCount + 1;   // Next item number in sequence
 
-        items[*itemCount].itemId = item;
-        strcpy(items[*itemCount].name, name);
+        items[*itemCount].itemId = itemNumber;
+        strcpy(items[*itemCount].name, newItemName);
 
-        // Start with zero stock at each location
-        for (j = 0; j < NUM_LOCATIONS; j++) {
-            items[*itemCount].stock[j] = 0;
+        // A new item starts with no stock at any location
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+            items[*itemCount].stock[locationIndex] = 0;
         }
 
         (*itemCount)++;
     }
 
-    // Prevent the stock from becoming too large
-    if ((long long)items[item-1].stock[location-1]
-        + amount > 2147483647LL) {
+    // Convert the numbers the user typed (starting at 1) into array indexes
+    itemIndex = itemNumber - 1;
+    locationIndex = locationNumber - 1;
+
+    // Step 7: stop the stock going past the largest value an int can hold
+    if ((long long)items[itemIndex].stock[locationIndex] + donationAmount > INT_MAX) {
         printf("Donation amount is too large.\n");
         return;
     }
 
-    // Add the donation to the selected location
-    updateStock(&items[item-1].stock[location-1], amount);
+    // Step 8: add the donation and confirm it to the user
+    updateStock(&items[itemIndex].stock[locationIndex], donationAmount);
 
     printf("\nDonation recorded successfully!\n");
-    printf("Food item: %s\n", items[item-1].name);
-    printf("New stock: %d\n",
-           items[item-1].stock[location-1]);
+    printf("Food item: %s\n", items[itemIndex].name);
+    printf("New stock: %d\n", items[itemIndex].stock[locationIndex]);
 }
 
-// Display items that are running low
+// Lists every item and location where stock is below LOW_STOCK_THRESHOLD.
+// Each location is checked on its own, so one item can appear more than once.
 void displayLowStockItems(const FoodItem items[], int itemCount)
 {
-    int i, j;
-    int found = 0;
+    int itemIndex;          // Item being checked
+    int locationIndex;      // Location being checked for that item
+    int lowStockFound = 0;  // Becomes 1 once any low-stock entry is printed
 
     printf("\n--- LOW STOCK ITEMS ---\n");
 
-    // Check each item at every location
-    for (i = 0; i < itemCount; i++) {
-        for (j = 0; j < NUM_LOCATIONS; j++) {
-
-            // Anything below 5 is considered low
-            if (items[i].stock[j] < 5) {
+    for (itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+            if (items[itemIndex].stock[locationIndex] < LOW_STOCK_THRESHOLD) {
                 printf("%s - Location %d: %d left\n",
-                       items[i].name, j + 1,
-                       items[i].stock[j]);
+                       items[itemIndex].name, locationIndex + 1,
+                       items[itemIndex].stock[locationIndex]);
 
-                found = 1;
+                lowStockFound = 1;
             }
         }
     }
 
-    if (found == 0) {
+    if (lowStockFound == 0) {
         printf("No low stock items found.\n");
     }
 }
-
 
 // PLACEHOLDER - Part 2/3: sort items by total stock and display them
 void sortFoodItemsByStock(FoodItem items[], int itemCount)
