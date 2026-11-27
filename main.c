@@ -9,12 +9,9 @@
  *   - Part 2: Inventory and Donations (section 10).
  *   - Part 3: Customer Requests, by Matthew-Earle Ellington "2004981"
  *     (section 11).
- * Each part's constants, structures and functions are labelled "PART 2" or
- * "PART 3" so they stay separate from Part 1.
- *
- * Functions marked "PLACEHOLDER" belong to other group members. They only
- * print a message so the program compiles and the menus can be tested.
- * Replace them with the real implementations when they are available.
+ *   - Part 4: File Handling and Sorted Stock Report (section 12).
+ * Each part's constants, structures and functions are labelled "PART 2",
+ * "PART 3" or "PART 4" so they stay separate from Part 1.
  *
  * Completed by Anthony Granston "2602727"
  * Compile: gcc -Wall -Wextra -std=c11 main.c -o main
@@ -71,6 +68,11 @@
 #define MAX_REQUESTS   100  // Maximum number of customer requests stored
 #define ITEM_NOT_FOUND -1   // Returned by findItemIndexById() when no item matches
 
+// PART 4 - File Handling and Sorted Stock Report constants
+#define DATA_FILE       "foodbank_data.txt"   // Text file the inventory is saved in
+#define SORT_ASCENDING  1   // Sort option: lowest total stock first
+#define SORT_DESCENDING 2   // Sort option: highest total stock first
+
 // ==========================================
 // 3. Structure Declarations
 // ==========================================
@@ -82,7 +84,7 @@ typedef struct {
     int role;                       // ROLE_ADMIN or ROLE_CUSTOMER
 } User;
 
-// One food item record (PROVISIONAL - fields must be agreed with Parts 2-4)
+// One food item record, shared by Parts 1-4.
 // The stock array holds the quantity at each location.
 // The array index is the location identifier (0 to NUM_LOCATIONS - 1).
 typedef struct {
@@ -131,9 +133,12 @@ int findItemIndexById(const FoodItem items[], int itemCount, int searchItemId);
 void makeFoodRequest(const FoodItem items[], int itemCount,
                      Request requests[], int *requestCount);
 
-// Remaining features (PLACEHOLDERS in this file)
-void sortFoodItemsByStock(FoodItem items[], int itemCount);
+// PART 4 - File Handling and Sorted Stock Report (also uses totalStock())
+int readFileInteger(FILE *dataFile, int *value);
+void loadData(FoodItem items[], int *itemCount);
 void saveData(const FoodItem items[], int itemCount);
+void swapItems(FoodItem *firstItem, FoodItem *secondItem);
+void sortFoodItemsByStock(const FoodItem items[], int itemCount);
 
 // ==========================================
 // 5. Main Function
@@ -154,6 +159,9 @@ int main(void)
     int choice;
     int userIndex;
     int running = 1;
+
+    // PART 4 - load the inventory saved by the previous run (if any)
+    loadData(items, &itemCount);
 
     while (running) {
         displayWelcomeMenu();
@@ -700,23 +708,233 @@ void makeFoodRequest(const FoodItem items[], int itemCount,
 }
 
 // ==========================================
-// 12. Placeholders for Remaining Features
+// 12. PART 4 - File Handling and Sorted Stock Report
 // ==========================================
-// These functions only print a message so the menus can be tested.
-// Replace each one when the group member's real function is added.
+// Saves the inventory to a text file when a user chooses "Save and exit",
+// loads it back when the program starts, and shows a report of the food
+// items sorted by total stock (bubble sort).
+//
+// DATA FILE FORMAT (plain text, sequential access, file name is DATA_FILE).
+// Every value is on its own line:
+//   line 1: the number of food items
+//   then, for each food item:
+//     - the item ID
+//     - the item name (may contain spaces)
+//     - the stock at each location, one line per location
+//       (NUM_LOCATIONS lines, Location 1 first)
+//
+// Item IDs in the file must be 1, 2, 3 ... in order, because Part 2 uses
+// (item ID - 1) as the item's position in the items array.
 
-// PLACEHOLDER - Part 2: sort items by total stock and display them
-void sortFoodItemsByStock(FoodItem items[], int itemCount)
+// Reads one line from the data file and converts it to an integer.
+// Returns 1 if the line holds exactly one whole number, otherwise 0
+// (also 0 if the end of the file has been reached).
+int readFileInteger(FILE *dataFile, int *value)
 {
-    (void)items;
-    (void)itemCount;
-    printf("[PLACEHOLDER] sortFoodItemsByStock() not yet implemented.\n");
+    char lineBuffer[MAX_INPUT_LENGTH];   // One line read from the file
+    char extraCharacter;                 // Detects anything after the number
+
+    if (fgets(lineBuffer, sizeof(lineBuffer), dataFile) == NULL) {
+        return 0;
+    }
+    if (sscanf(lineBuffer, "%d %c", value, &extraCharacter) != 1) {
+        return 0;
+    }
+    return 1;
 }
 
-// PLACEHOLDER - Part 4 (Member 4): save the food item records
+// Loads the food items from the data file into the items array.
+// - A missing file is normal on the first run: the program starts with
+//   no food items.
+// - If any part of the file is damaged, nothing is loaded (half-loaded
+//   data is never used) and the program still runs with no food items.
+void loadData(FoodItem items[], int *itemCount)
+{
+    FILE *dataFile;                       // The open data file
+    char lineBuffer[MAX_INPUT_LENGTH];    // One line read from the file
+    int fileItemCount = 0;                // Number of items the file says it holds
+    int itemIndex;                        // Item being read
+    int locationIndex;                    // Location being read for that item
+    int fileIsValid = 1;                  // Becomes 0 as soon as a problem is found
+
+    *itemCount = 0;
+
+    dataFile = fopen(DATA_FILE, "r");
+    if (dataFile == NULL) {
+        printf("No data file found. Starting with no food items.\n");
+        return;
+    }
+
+    // Step 1: line 1 holds the number of items (0 to MAX_ITEMS)
+    if (!readFileInteger(dataFile, &fileItemCount)
+        || fileItemCount < 0 || fileItemCount > MAX_ITEMS) {
+        fileIsValid = 0;
+    }
+
+    // Step 2: read each item - its ID, its name, then its stock per location
+    for (itemIndex = 0; itemIndex < fileItemCount && fileIsValid; itemIndex++) {
+
+        // Item ID: must match the item's position (1, 2, 3 ...), see above
+        if (!readFileInteger(dataFile, &items[itemIndex].itemId)
+            || items[itemIndex].itemId != itemIndex + 1) {
+            fileIsValid = 0;
+        }
+
+        // Item name: must not be empty and must fit in the name array
+        if (fileIsValid) {
+            if (fgets(lineBuffer, sizeof(lineBuffer), dataFile) == NULL) {
+                fileIsValid = 0;
+            } else {
+                lineBuffer[strcspn(lineBuffer, "\r\n")] = '\0';   // Remove the newline
+                if (strlen(lineBuffer) == 0
+                    || strlen(lineBuffer) >= MAX_ITEM_NAME_LENGTH) {
+                    fileIsValid = 0;
+                } else {
+                    strcpy(items[itemIndex].name, lineBuffer);
+                }
+            }
+        }
+
+        // Stock at each location: cannot be negative
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS && fileIsValid; locationIndex++) {
+            if (!readFileInteger(dataFile, &items[itemIndex].stock[locationIndex])
+                || items[itemIndex].stock[locationIndex] < 0) {
+                fileIsValid = 0;
+            }
+        }
+    }
+
+    fclose(dataFile);
+
+    // Step 3: only keep the items if the whole file was read correctly
+    if (fileIsValid) {
+        *itemCount = fileItemCount;
+        printf("Loaded %d food items from %s.\n", fileItemCount, DATA_FILE);
+    } else {
+        *itemCount = 0;
+        printf("The data file %s is damaged. Starting with no food items.\n", DATA_FILE);
+    }
+}
+
+// Saves all food items to the data file, in the format described above.
+// Any existing file is replaced.
 void saveData(const FoodItem items[], int itemCount)
 {
-    (void)items;
-    (void)itemCount;
-    printf("[PLACEHOLDER] saveData() not yet implemented. Nothing was saved.\n");
+    FILE *dataFile;      // The open data file
+    int itemIndex;       // Item being written
+    int locationIndex;   // Location being written for that item
+
+    dataFile = fopen(DATA_FILE, "w");
+    if (dataFile == NULL) {
+        printf("Error: could not open %s for writing. Nothing was saved.\n", DATA_FILE);
+        return;
+    }
+
+    fprintf(dataFile, "%d\n", itemCount);
+    for (itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        fprintf(dataFile, "%d\n", items[itemIndex].itemId);
+        fprintf(dataFile, "%s\n", items[itemIndex].name);
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+            fprintf(dataFile, "%d\n", items[itemIndex].stock[locationIndex]);
+        }
+    }
+
+    fclose(dataFile);
+    printf("Data saved to %s.\n", DATA_FILE);
+}
+
+// Swaps two food items using pointers.
+// The whole record moves, so an item always keeps its own name and stock.
+void swapItems(FoodItem *firstItem, FoodItem *secondItem)
+{
+    FoodItem temporaryItem;   // Holds the first item while it is overwritten
+
+    temporaryItem = *firstItem;
+    *firstItem = *secondItem;
+    *secondItem = temporaryItem;
+}
+
+// Sorts the food items by total stock using bubble sort and displays them.
+// - The sort is done on a COPY of the items, so the real inventory order
+//   (which Part 2's item numbering depends on) is never changed.
+// - Items with equal totals stay in their original order, because they
+//   are only swapped when strictly out of order.
+// - Total stock comes from Part 2's totalStock() (section 10).
+void sortFoodItemsByStock(const FoodItem items[], int itemCount)
+{
+    FoodItem sortedItems[MAX_ITEMS];   // Copy of the items that gets sorted
+    int sortOrder;                     // SORT_ASCENDING or SORT_DESCENDING
+    int passNumber;                    // Bubble sort pass (outer loop)
+    int pairIndex;                     // Left item of the pair being compared
+    int itemIndex;                     // Item being copied or printed
+    int locationIndex;                 // Location column being printed
+    int swapMade;                      // 1 if this pass swapped any items
+    int pairOutOfOrder;                // 1 if the current pair must be swapped
+    long long firstTotal;              // Total stock of the left item
+    long long secondTotal;             // Total stock of the right item
+
+    if (itemCount == 0) {
+        printf("There are no food items to sort.\n");
+        return;
+    }
+
+    // Step 1: ask which order to sort in
+    printf("\n--- Sort Food Items by Total Stock ---\n");
+    printf("%d. Ascending (lowest total first)\n", SORT_ASCENDING);
+    printf("%d. Descending (highest total first)\n", SORT_DESCENDING);
+    printf("Enter your choice: ");
+    sortOrder = readInteger();
+    if (sortOrder != SORT_ASCENDING && sortOrder != SORT_DESCENDING) {
+        printf("Invalid choice. Please enter %d or %d.\n", SORT_ASCENDING, SORT_DESCENDING);
+        return;
+    }
+
+    // Step 2: copy the items so the original array is not changed
+    for (itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        sortedItems[itemIndex] = items[itemIndex];
+    }
+
+    // Step 3: bubble sort - each pass moves the next largest (ascending)
+    // or smallest (descending) total to the end of the unsorted part
+    for (passNumber = 0; passNumber < itemCount - 1; passNumber++) {
+        swapMade = 0;
+
+        for (pairIndex = 0; pairIndex < itemCount - 1 - passNumber; pairIndex++) {
+            firstTotal = totalStock(&sortedItems[pairIndex]);
+            secondTotal = totalStock(&sortedItems[pairIndex + 1]);
+
+            if (sortOrder == SORT_ASCENDING) {
+                pairOutOfOrder = (firstTotal > secondTotal);
+            } else {
+                pairOutOfOrder = (firstTotal < secondTotal);
+            }
+
+            if (pairOutOfOrder) {
+                swapItems(&sortedItems[pairIndex], &sortedItems[pairIndex + 1]);
+                swapMade = 1;
+            }
+        }
+
+        if (swapMade == 0) {
+            break;   // No swaps in this pass, so the list is already sorted
+        }
+    }
+
+    // Step 4: display the sorted list as a table
+    // Heading row, e.g. "ID    Name    Loc1   Loc2   Loc3   Total"
+    printf("\n--- Food Items Sorted by Total Stock ---\n");
+    printf("%-5s %-30s", "ID", "Name");
+    for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+        printf(" Loc%-3d", locationIndex + 1);
+    }
+    printf(" Total\n");
+
+    // One row per item
+    for (itemIndex = 0; itemIndex < itemCount; itemIndex++) {
+        printf("%-5d %-30s", sortedItems[itemIndex].itemId, sortedItems[itemIndex].name);
+        for (locationIndex = 0; locationIndex < NUM_LOCATIONS; locationIndex++) {
+            printf(" %6d", sortedItems[itemIndex].stock[locationIndex]);
+        }
+        printf(" %5lld\n", totalStock(&sortedItems[itemIndex]));
+    }
 }

@@ -3,3 +3,6 @@
 
 #Ignore Compiled Files
 main
+
+# Program data file (created when the program saves)
+foodbank_data.txt
