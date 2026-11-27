@@ -1,20 +1,21 @@
 /*
  * Community Food Bank Inventory and Distribution System
- * Part 1 - Program Entry and Shared Design
- *
- * This file contains the whole program:
- *   - Part 1: program entry point, user registration and login, the
+ * Anthony Granston "2602727"
+ * Rhian Sang "2203004"
+ * Matthew-Earle Ellington "2004981"
+ * Aldane Stennett ""
+ * 
+ * Part 1: program entry point, user registration and login, the
  *     administrator and customer menus, and the shared declarations
  *     (constants, structures and function prototypes).
- *   - Part 2: Inventory and Donations (section 10).
- *   - Part 3: Customer Requests, by Matthew-Earle Ellington "2004981"
- *     (section 11).
- *   - Part 4: File Handling and Sorted Stock Report (section 12).
- * Each part's constants, structures and functions are labelled "PART 2",
- * "PART 3" or "PART 4" so they stay separate from Part 1.
+ * 
+ * Part 2: Inventory and Donations (section 10).
+ * 
+ * Part 3: Customer Requests, by Matthew-Earle Ellington "2004981"
+ * 
+ * Part 4: File Handling and Sorted Stock Report (section 12).
  *
- * Completed by Anthony Granston "2602727"
- * Compile: gcc -Wall -Wextra -std=c11 main.c -o main
+ * Compile: gcc -Wall -Wextra -std=c11 main.c -o main (WSL[Linux])
  * Run:     ./main
  */
 
@@ -84,9 +85,6 @@ typedef struct {
     int role;                       // ROLE_ADMIN or ROLE_CUSTOMER
 } User;
 
-// One food item record, shared by Parts 1-4.
-// The stock array holds the quantity at each location.
-// The array index is the location identifier (0 to NUM_LOCATIONS - 1).
 typedef struct {
     int itemId;
     char name[MAX_ITEM_NAME_LENGTH];
@@ -140,9 +138,6 @@ void saveData(const FoodItem items[], int itemCount);
 void swapItems(FoodItem *firstItem, FoodItem *secondItem);
 void sortFoodItemsByStock(const FoodItem items[], int itemCount);
 
-// ==========================================
-// 5. Main Function
-// ==========================================
 int main(void)
 {
     // Shared data is declared here and passed to functions (no globals)
@@ -338,7 +333,7 @@ int loginUser(const User users[], int userCount)
 }
 
 // ==========================================
-// 8. Administrator Menu Functions
+// Administrator Menu Functions
 // ==========================================
 
 void displayAdminMenu(void)
@@ -387,7 +382,7 @@ void runAdminMenu(FoodItem items[], int *itemCount)
 }
 
 // ==========================================
-// 9. Customer Menu Functions
+// Customer Menu Functions
 // ==========================================
 
 void displayCustomerMenu(void)
@@ -433,14 +428,7 @@ void runCustomerMenu(FoodItem items[], int *itemCount,
 // ==========================================
 // Lets the administrator view the inventory, record donations (adding new
 // food items when needed) and see which items are running low.
-//
-// Item numbering: items are numbered 1, 2, 3 ... in the order they are
-// added, so an item's number is always (its array index + 1). The functions
-// below rely on this to turn the number a user types into an array index.
 
-// Adds up the stock of one item across every location.
-// A long long is returned because the sum of several int values can be
-// larger than the biggest value an int can hold.
 long long totalStock(const FoodItem *item)
 {
     long long stockTotal = 0;   // Running total of stock
@@ -618,13 +606,7 @@ void displayLowStockItems(const FoodItem items[], int itemCount)
 // The request is checked against the total stock of that item (all
 // locations added together) and, if valid, stored in the requests array.
 //
-// Part 3 uses its own data (the Request structure, the requests array and
-// requestCount, declared in main) and its own local variable names, so it
-// does not share or overwrite any Part 1 or Part 2 variables. The only
-// Part 2 function it uses is totalStock(), to add up an item's stock.
 
-// Searches the items array for the item with the given ID.
-// Returns the array index of that item, or ITEM_NOT_FOUND if no item matches.
 int findItemIndexById(const FoodItem items[], int itemCount, int searchItemId)
 {
     int itemPosition;   // Current position being checked in the items array
@@ -713,22 +695,7 @@ void makeFoodRequest(const FoodItem items[], int itemCount,
 // Saves the inventory to a text file when a user chooses "Save and exit",
 // loads it back when the program starts, and shows a report of the food
 // items sorted by total stock (bubble sort).
-//
-// DATA FILE FORMAT (plain text, sequential access, file name is DATA_FILE).
-// Every value is on its own line:
-//   line 1: the number of food items
-//   then, for each food item:
-//     - the item ID
-//     - the item name (may contain spaces)
-//     - the stock at each location, one line per location
-//       (NUM_LOCATIONS lines, Location 1 first)
-//
-// Item IDs in the file must be 1, 2, 3 ... in order, because Part 2 uses
-// (item ID - 1) as the item's position in the items array.
 
-// Reads one line from the data file and converts it to an integer.
-// Returns 1 if the line holds exactly one whole number, otherwise 0
-// (also 0 if the end of the file has been reached).
 int readFileInteger(FILE *dataFile, int *value)
 {
     char lineBuffer[MAX_INPUT_LENGTH];   // One line read from the file
